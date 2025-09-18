@@ -15,7 +15,7 @@ workflows:
       - name: Clean
         script: flutter clean
       - name: Build debug APK
-        script: flutter build apk --debug --no-split-per-abi --no-shrink
+        script: flutter build apk --debug --no-shrink
       - name: Copy APK to artifacts
         script: |
           mkdir -p artifacts
