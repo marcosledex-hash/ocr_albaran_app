@@ -1,0 +1,29 @@
+workflows:
+  apk-debug:
+    name: Build Debug APK
+    max_build_duration: 60
+    environment:
+      flutter: stable
+    cache:
+      cache_paths:
+        - $FLUTTER_ROOT
+        - ~/.pub-cache
+        - android/.gradle
+    scripts:
+      - name: Get deps
+        script: flutter pub get
+      - name: Clean
+        script: flutter clean
+      - name: Build debug APK
+        script: flutter build apk --debug --no-split-per-abi --no-shrink
+      - name: Copy APK to artifacts
+        script: |
+          mkdir -p artifacts
+          cp build/app/outputs/flutter-apk/app-debug.apk artifacts/ || true
+          find build -type f -iname "*.apk" -exec cp {} artifacts/ \; || true
+      - name: Verify artifacts content
+        script: |
+          echo "Listing content of artifacts folder:"
+          ls -R artifacts/ || true
+    artifacts:
+      - artifacts/*.apk
