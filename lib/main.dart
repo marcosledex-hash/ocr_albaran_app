@@ -205,7 +205,13 @@ class _OCRHomePageState extends State<OCRHomePage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error decodificando imagen para recorte.')));
       return;
     }
-    final crop = img_pkg.copyCrop(decoded, left, top, width, height);
+    final crop = img_pkg.copyCrop(
+     decoded,
+     x: left,
+     y: top,
+     width: width,
+     height: height,
+    );
     final tempDir = await getTemporaryDirectory();
     final croppedFile = File('${tempDir.path}/ocr_crop_${DateTime.now().millisecondsSinceEpoch}.jpg');
     await croppedFile.writeAsBytes(img_pkg.encodeJpg(crop, quality: 90));
