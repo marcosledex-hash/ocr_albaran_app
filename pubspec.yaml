@@ -1,5 +1,5 @@
 name: ocr_albaran_app
-description: OCR para albaranes: detecta pedido y albarán, selección, corrección y envío por email.
+description: "OCR para albaranes: detecta pedido y albarán, selección, corrección y envío por email."
 publish_to: 'none'
 version: 1.0.0+1
 
