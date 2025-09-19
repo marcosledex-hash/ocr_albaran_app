@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img_pkg;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_email_sender/flutter_email_sender.dart';
+import 'mailer_helper.dart';
 
 void main() {
   runApp(const OCRApp());
@@ -34,27 +35,63 @@ class OCRHomePage extends StatefulWidget {
 }
 
 class _OCRHomePageState extends State<OCRHomePage> {
+  // -------------------------
+  // Variables (3.2)
+  // -------------------------
   File? _imageFile;
   String recognizedFullText = '';
   String pedido = '';
   String albaran = '';
   String emailTo = '';
+
   bool drawing = false;
   Offset? dragStart;
   Offset? dragCurrent;
+
   final ImagePicker picker = ImagePicker();
   final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+
+  final GlobalKey _imageKey = GlobalKey();
+
+  // Controllers for editable fields (so they remain after rebuilds)
+  final TextEditingController pedidoController = TextEditingController();
+  final TextEditingController albaranController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadEmail();
+    // keep controllers in sync with variables
+    pedidoController.addListener(() {
+      pedido = pedidoController.text;
+    });
+    albaranController.addListener(() {
+      albaran = albaranController.text;
+    });
+    emailController.addListener(() {
+      // don't save continuously here, use explicit save or when editing complete
+    });
   }
 
+  @override
+  void dispose() {
+    pedidoController.dispose();
+    albaranController.dispose();
+    emailController.dispose();
+    textRecognizer.close();
+    super.dispose();
+  }
+
+  // -------------------------
+  // 3.3 / 3.4 Persistencia del email usando SharedPreferences
+  // -------------------------
   Future<void> _loadEmail() async {
     final prefs = await SharedPreferences.getInstance();
+    final e = prefs.getString('ocr_email') ?? '';
     setState(() {
-      emailTo = prefs.getString('ocr_email') ?? '';
+      emailTo = e;
+      emailController.text = e;
     });
   }
 
@@ -66,38 +103,59 @@ class _OCRHomePageState extends State<OCRHomePage> {
     });
   }
 
+  // -------------------------
+  // Tomar foto / seleccionar
+  // -------------------------
   Future<void> _captureImage() async {
     try {
-      final XFile? picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
-      if (picked == null) return;
+      final XFile? selected = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+      if (selected == null) return;
       setState(() {
-        _imageFile = File(picked.path);
+        _imageFile = File(selected.path);
         pedido = '';
         albaran = '';
         recognizedFullText = '';
+        pedidoController.text = '';
+        albaranController.text = '';
+        dragStart = null;
+        dragCurrent = null;
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error cámara: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al tomar foto: $e')));
     }
+  }
+
+  // -------------------------
+  // Detectar todo (opción B)
+  // -------------------------
+  String _normalize(String s) {
+    var t = s.toLowerCase();
+    // reemplazos simples de acentos (básico)
+    const withDiacritics = 'áéíóúàèìòùäëïöüñ';
+    const without = 'aeiouaeiouaeioun';
+    for (int i = 0; i < withDiacritics.length; i++) {
+      t = t.replaceAll(withDiacritics[i], without[i]);
+    }
+    return t;
   }
 
   Future<void> _detectAll() async {
     if (_imageFile == null) return;
-    final input = InputImage.fromFile(_imageFile!);
+    final input = InputImage.fromFilePath(_imageFile!.path);
     final result = await textRecognizer.processImage(input);
-    final blocks = result.blocks;
     recognizedFullText = result.text;
-    // Resetea
+
     String foundPedido = '';
     String foundAlbaran = '';
-    final keysPedido = ['pedido', 'pedido:'];
-    final keysAlbaran = ['albaran', 'albarán', 'albarán:', 'albaran:'];
 
-    // Scan lines for keywords and pick the token immediately after keyword
-    for (final block in blocks) {
+    final keysPedido = ['pedido', 'pedido:'];
+    final keysAlbaran = ['albaran', 'albarán', 'albaran:', 'albarán:'];
+
+    for (final block in result.blocks) {
       for (final line in block.lines) {
         final lineText = line.text;
-        final lower = lineText.toLowerCase();
+        final lower = _normalize(lineText);
+
         // PEDIDO
         for (final k in keysPedido) {
           if (lower.contains(k)) {
@@ -107,13 +165,13 @@ class _OCRHomePageState extends State<OCRHomePage> {
             if (m != null) {
               foundPedido = m.group(0) ?? '';
             } else {
-              // try split fallback
-              final parts = after.split(RegExp(r'[\s:]+')).where((s) => s.isNotEmpty).toList();
+              final parts = after.split(RegExp(r'[\s:]+')).where((s) => s.isNotEmpty);
               if (parts.isNotEmpty) foundPedido = parts.first;
             }
           }
         }
-        // ALBARAN
+
+        // ALBARÁN
         for (final k in keysAlbaran) {
           if (lower.contains(k)) {
             final idx = lower.indexOf(k);
@@ -122,7 +180,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
             if (m != null) {
               foundAlbaran = m.group(0) ?? '';
             } else {
-              final parts = after.split(RegExp(r'[\s:]+')).where((s) => s.isNotEmpty).toList();
+              final parts = after.split(RegExp(r'[\s:]+')).where((s) => s.isNotEmpty);
               if (parts.isNotEmpty) foundAlbaran = parts.first;
             }
           }
@@ -130,7 +188,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
       }
     }
 
-    // Fallbacks: if not found, search for first long number-like tokens in whole text
+    // Backups: si no se encuentran intentar por tokens globales
     if (foundPedido.isEmpty) {
       final m = RegExp(r'\b([0-9A-Za-z\-/]{4,})\b').firstMatch(result.text);
       if (m != null) foundPedido = m.group(0) ?? '';
@@ -138,132 +196,211 @@ class _OCRHomePageState extends State<OCRHomePage> {
     if (foundAlbaran.isEmpty) {
       final matches = RegExp(r'\b([0-9A-Za-z\-/]{4,})\b').allMatches(result.text).toList();
       if (matches.length >= 2) {
-        foundAlbaran = matches.length >= 2 ? matches[1].group(0) ?? '' : (matches.isNotEmpty ? matches.first.group(0) ?? '' : '');
+        foundAlbaran = matches[1].group(0) ?? '';
       } else if (matches.isNotEmpty) {
-        foundAlbaran = matches.first.group(0) ?? '';
+        foundAlbaran = matches[0].group(0) ?? '';
       }
     }
 
     setState(() {
       pedido = foundPedido;
       albaran = foundAlbaran;
+      pedidoController.text = pedido;
+      albaranController.text = albaran;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Detección automática completada. Revise y corrija si hace falta.')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Detección completada')));
   }
 
+  // -------------------------
+  // Helper: retorna Rect con la selección si existe
+  // -------------------------
   Rect? getSelectedRect() {
     if (dragStart == null || dragCurrent == null) return null;
     return Rect.fromPoints(dragStart!, dragCurrent!);
   }
 
+  // -------------------------
+  // 3.4 OCR dentro de la selección (recorte + MLKit)
+  // -------------------------
   Future<void> _ocrSelectionFor(String target) async {
-    if (_imageFile == null) return;
+    if (_imageFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay imagen')));
+      return;
+    }
     final sel = getSelectedRect();
     if (sel == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dibuja primero un rectángulo sobre la imagen.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay selección')));
       return;
     }
 
-    // Decode actual image size
+    // Leer bytes y dimensiones reales
     final bytes = await _imageFile!.readAsBytes();
     final uiImage = await decodeImageFromList(bytes);
     final imgW = uiImage.width.toDouble();
     final imgH = uiImage.height.toDouble();
 
-    // Determine how image is displayed in widget (we used BoxFit.contain)
-    // We'll compute mapping from widget coords to image pixel coords.
-    // First we need widget size where image is shown: obtain via context using a GlobalKey
-    // For simplicity, use MediaQuery to get max width allowed and assume image displays scaled to fit
-    final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+    // Obtener tamaño del widget donde se muestra la imagen
+    final box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al mapear coordenadas (widget no disponible).')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error: sin contexto de imagen')));
       return;
     }
     final widgetSize = box.size;
     final widgetW = widgetSize.width;
     final widgetH = widgetSize.height;
 
-    // Calculate scale for BoxFit.contain
-    final scale = min(widgetW / imgW, widgetH / imgH);
-    final dispW = imgW * scale;
-    final dispH = imgH * scale;
+    // Cálculo BoxFit.contain (asumimos que la imagen se muestra con contain)
+    final usedScale = min(widgetW / imgW, widgetH / imgH);
+    final dispW = imgW * usedScale;
+    final dispH = imgH * usedScale;
     final offsetX = (widgetW - dispW) / 2;
     final offsetY = (widgetH - dispH) / 2;
 
-    // Map selection rect from widget coords to image pixel coords
-    final left = ((sel.left - offsetX) / scale).clamp(0.0, imgW).toInt();
-    final top = ((sel.top - offsetY) / scale).clamp(0.0, imgH).toInt();
-    final right = ((sel.right - offsetX) / scale).clamp(0.0, imgW).toInt();
-    final bottom = ((sel.bottom - offsetY) / scale).clamp(0.0, imgH).toInt();
+    // Mapeo de coordenadas widget -> pixeles imagen
+    final left = ((sel.left - offsetX) / usedScale).clamp(0.0, imgW).toInt();
+    final top = ((sel.top - offsetY) / usedScale).clamp(0.0, imgH).toInt();
+    final right = ((sel.right - offsetX) / usedScale).clamp(0.0, imgW).toInt();
+    final bottom = ((sel.bottom - offsetY) / usedScale).clamp(0.0, imgH).toInt();
+
     final width = max(1, right - left);
     final height = max(1, bottom - top);
 
-    // Crop using package:image
+    // Recortar usando package:image (usa named params para compatibilidad con versiones recientes)
     final decoded = img_pkg.decodeImage(bytes);
     if (decoded == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error decodificando imagen para recorte.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error decodificando imagen')));
       return;
     }
-    final crop = img_pkg.copyCrop(
-     decoded,
-     x: left,
-     y: top,
-     width: width,
-     height: height,
-    );
+
+    final crop = img_pkg.copyCrop(decoded, x: left, y: top, width: width, height: height);
+
     final tempDir = await getTemporaryDirectory();
     final croppedFile = File('${tempDir.path}/ocr_crop_${DateTime.now().millisecondsSinceEpoch}.jpg');
     await croppedFile.writeAsBytes(img_pkg.encodeJpg(crop, quality: 90));
 
-    // Run MLKit on cropped file
-    final input = InputImage.fromFile(croppedFile);
+    // Ejecutar MLKit sobre el recorte
+    final input = InputImage.fromFilePath(croppedFile.path);
     final res = await textRecognizer.processImage(input);
     final text = res.text.trim();
 
-    // Simple extraction: take first token that looks like number/ID
     final m = RegExp(r'([A-Za-z0-9\-/]{3,})').firstMatch(text);
 
     setState(() {
       if (target == 'pedido') {
         pedido = m?.group(0) ?? text;
+        pedidoController.text = pedido;
       } else {
         albaran = m?.group(0) ?? text;
+        albaranController.text = albaran;
       }
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('OCR de selección completado')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('OCR en selección completado')));
   }
 
-  // Key to read widget size
-  final GlobalKey _imageKey = GlobalKey();
-
+  // -------------------------
+  // 3.5 Enviar email con flutter_email_sender
+  // -------------------------
   Future<void> _sendEmailWithData() async {
     if (_imageFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay imagen para enviar.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay imagen para enviar')));
       return;
     }
-    if (emailTo.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configura un email en ajustes.')));
+    if (emailTo.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Introduce email destino')));
       return;
     }
 
+    // Guardar email persistente
+    await _saveEmail(emailTo.trim());
+
     final body = 'Albarán: $albaran\nPedido: $pedido';
-    final Email em = Email(
+    final em = Email(
       body: body,
       subject: 'Albarán y Pedido detectados',
-      recipients: [emailTo],
+      recipients: [emailTo.trim()],
       attachmentPaths: [_imageFile!.path],
       isHTML: false,
     );
 
     try {
-      print("📨 Intentando enviar email...");
       await FlutterEmailSender.send(em);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Email enviado (o abierto el cliente de correo).')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Solicitud de envío creada. Revisa la app correo.')));
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al enviar email: $e')));
+      // Si no hay cliente de correo u otro fallo
+      final estr = e.toString().toLowerCase();
+      if (estr.contains('not_available') || estr.contains('no email clients')) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('No hay cliente de correo'),
+            content: const Text('No se ha encontrado app de correo en el dispositivo. Instala/configura una app (Gmail, Email) o copia manualmente los datos.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error enviando email: $e')));
+      }
     }
+  }
+
+  // -------------------------
+  // Construcción UI
+  // -------------------------
+  Widget _buildImageArea() {
+    if (_imageFile == null) return const SizedBox.shrink();
+    return GestureDetector(
+      onPanStart: (details) {
+        final box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null) return;
+        setState(() {
+          drawing = true;
+          dragStart = box.globalToLocal(details.globalPosition);
+          dragCurrent = dragStart;
+        });
+      },
+      onPanUpdate: (details) {
+        final box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+        if (box == null) return;
+        setState(() {
+          dragCurrent = box.globalToLocal(details.globalPosition);
+        });
+      },
+      onPanEnd: (_) {
+        setState(() {
+          drawing = false;
+        });
+      },
+      child: Container(
+        color: Colors.black12,
+        child: Center(
+          child: SizedBox(
+            // height constrained to avoid overflows
+            height: 480,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Image.file(
+                    _imageFile!,
+                    key: _imageKey,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                if (dragStart != null && dragCurrent != null)
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _RectPainter(rect: Rect.fromPoints(dragStart!, dragCurrent!)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _editEmailDialog() {
@@ -271,7 +408,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Configurar email destino'),
+        title: const Text('Configurar correo electrónico destino'),
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.emailAddress,
@@ -284,76 +421,18 @@ class _OCRHomePageState extends State<OCRHomePage> {
               Navigator.of(context).pop();
             },
             child: const Text('Guardar'),
-          )
+          ),
         ],
       ),
     );
   }
 
   @override
-  void dispose() {
-    textRecognizer.close();
-    super.dispose();
-  }
-
-  Widget _buildImageArea() {
-    if (_imageFile == null) return const SizedBox.shrink();
-    return GestureDetector(
-      onPanStart: (details) {
-        setState(() {
-          drawing = true;
-          final box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-          dragStart = box?.globalToLocal(details.globalPosition);
-          dragCurrent = dragStart;
-        });
-      },
-      onPanUpdate: (details) {
-        setState(() {
-          final box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-          dragCurrent = box?.globalToLocal(details.globalPosition);
-        });
-      },
-      onPanEnd: (details) {
-        setState(() {
-          drawing = false;
-        });
-      },
-      child: Container(
-        color: Colors.black12,
-        child: Center(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return SizedBox(
-                width: constraints.maxWidth,
-                height: min(constraints.maxHeight, 480),
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: Image.file(
-                        _imageFile!,
-                        key: _imageKey,
-                        fit: BoxFit.contain,
-                      ),
-                    ),
-                    if (dragStart != null && dragCurrent != null)
-                      CustomPaint(
-                        painter: _RectPainter(rect: Rect.fromPoints(dragStart!, dragCurrent!)),
-                        size: Size.infinite,
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final pedidoController = TextEditingController(text: pedido);
-    final albaranController = TextEditingController(text: albaran);
+    // Update controllers content in build in case variables changed elsewhere
+    pedidoController.text = pedido;
+    albaranController.text = albaran;
+    emailController.text = emailTo;
 
     return Scaffold(
       appBar: AppBar(
@@ -376,7 +455,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(child: ElevatedButton(onPressed: _detectAll, child: const Text('Detección automática'))),
+                Expanded(child: ElevatedButton(onPressed: _detectAll, child: const Text('Detectar (auto)'))),
                 const SizedBox(width: 8),
                 Expanded(child: ElevatedButton(onPressed: () => _ocrSelectionFor('pedido'), child: const Text('OCR selección → Pedido'))),
                 const SizedBox(width: 8),
@@ -386,14 +465,25 @@ class _OCRHomePageState extends State<OCRHomePage> {
             const SizedBox(height: 12),
             TextField(
               controller: pedidoController,
-              decoration: const InputDecoration(labelText: 'Pedido (editar si hace falta)'),
+              decoration: const InputDecoration(labelText: 'Pedido (editar si necesario)'),
               onChanged: (v) => pedido = v,
             ),
             const SizedBox(height: 8),
             TextField(
               controller: albaranController,
-              decoration: const InputDecoration(labelText: 'Albarán (editar si hace falta)'),
+              decoration: const InputDecoration(labelText: 'Albarán (editar si necesario)'),
               onChanged: (v) => albaran = v,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(labelText: 'Email destino (se guarda)'),
+              keyboardType: TextInputType.emailAddress,
+              onChanged: (v) => emailTo = v,
+              onEditingComplete: () {
+                _saveEmail(emailTo.trim());
+                FocusScope.of(context).unfocus();
+              },
             ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
@@ -402,7 +492,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
               onPressed: _sendEmailWithData,
             ),
             const SizedBox(height: 12),
-            Text('Email destino guardado: $emailTo'),
+            Text('Correo destino guardado: $emailTo'),
             const SizedBox(height: 16),
             ExpansionTile(
               title: const Text('Texto OCR completo (diagnóstico)'),
@@ -418,6 +508,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
 class _RectPainter extends CustomPainter {
   final Rect rect;
   _RectPainter({required this.rect});
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -432,5 +523,5 @@ class _RectPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _RectPainter oldDelegate) => oldDelegate.rect != rect;
 }

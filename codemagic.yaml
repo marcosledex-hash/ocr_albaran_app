@@ -4,6 +4,8 @@ workflows:
     max_build_duration: 60
     environment:
       flutter: stable
+      groups:
+        - email
     cache:
       cache_paths:
         - $FLUTTER_ROOT
@@ -15,7 +17,7 @@ workflows:
       - name: Clean
         script: flutter clean
       - name: Build debug APK
-        script: flutter build apk --debug --no-shrink
+        script: flutter build apk --debug --no-shrink --dart-define=SMTP_USER=$SMTP_USER --dart-define=SMTP_PASS=$SMTP_PASS
       - name: Copy APK to artifacts
         script: |
           mkdir -p artifacts
