@@ -6,9 +6,6 @@ workflows:
       flutter: stable
       groups:
         - email
-      vars:
-        SMTP_USER: Encrypted(SMTP_USER)
-        SMTP_PASS: Encrypted(SMTP_PASS)
     cache:
       cache_paths:
         - $FLUTTER_ROOT
