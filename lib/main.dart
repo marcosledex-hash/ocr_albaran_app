@@ -258,7 +258,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
     );
 
     try {
-      print("📨 Intentando enviar email con destinatario: $destinatario y adjunto: $filePath");
+      print("📨 Intentando enviar email con destinatario: ${recipientController.text} y adjunto: $imagePath");
       await FlutterEmailSender.send(em);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Email enviado (o abierto el cliente de correo).')));
     } catch (e) {
