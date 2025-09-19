@@ -318,26 +318,27 @@ class _OCRHomePageState extends State<OCRHomePage> {
 
   final body = 'Albarán: $albaran\nPedido: $pedido';
 
-  try {
-    print("📨 Enviando con mailer...");
-    await sendMail(
-      emailTo,
-      'Albarán y Pedido detectados',
-      body,
-      _imageFile!.path,
-    );
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Correo enviado ✅')),
-    );
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error al enviar: $e')),
-    );
-  }
+try {
+  print("📨 Enviando con mailer (SMTP)...");
+  await MailerHelper.sendSmtpMail(
+    smtpUser: const String.fromEnvironment('SMTP_USER'),
+    smtpPass: const String.fromEnvironment('SMTP_PASS'),
+    toEmail: emailTo.trim(),
+    subject: 'Albarán y Pedido detectados',
+    body: body,
+    attachmentPath: _imageFile!.path,
+  );
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Se envió el correo ✅')),
+  );
+ } catch (e) {
+   ScaffoldMessenger.of(context).showSnackBar(
+     SnackBar(content: Text('Error al enviar: $e')),
+  );
+ }
 }
 
-  // -------------------------
-  // Construcción UI
+  // -------------------------  // Construcción UI
   // -------------------------
   Widget _buildImageArea() {
     if (_imageFile == null) return const SizedBox.shrink();
