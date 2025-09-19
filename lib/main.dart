@@ -303,49 +303,38 @@ class _OCRHomePageState extends State<OCRHomePage> {
   // 3.5 Enviar email con flutter_email_sender
   // -------------------------
   Future<void> _sendEmailWithData() async {
-    if (_imageFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay imagen para enviar')));
-      return;
-    }
-    if (emailTo.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Introduce email destino')));
-      return;
-    }
-
-    // Guardar email persistente
-    await _saveEmail(emailTo.trim());
-
-    final body = 'Albarán: $albaran\nPedido: $pedido';
-    final em = Email(
-      body: body,
-      subject: 'Albarán y Pedido detectados',
-      recipients: [emailTo.trim()],
-      attachmentPaths: [_imageFile!.path],
-      isHTML: false,
+  if (_imageFile == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No hay imagen capturada')),
     );
-
-    try {
-      await FlutterEmailSender.send(em);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Solicitud de envío creada. Revisa la app correo.')));
-    } catch (e) {
-      // Si no hay cliente de correo u otro fallo
-      final estr = e.toString().toLowerCase();
-      if (estr.contains('not_available') || estr.contains('no email clients')) {
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('No hay cliente de correo'),
-            content: const Text('No se ha encontrado app de correo en el dispositivo. Instala/configura una app (Gmail, Email) o copia manualmente los datos.'),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK')),
-            ],
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error enviando email: $e')));
-      }
-    }
+    return;
   }
+  if (emailTo.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Configura primero un correo destino')),
+    );
+    return;
+  }
+
+  final body = 'Albarán: $albaran\nPedido: $pedido';
+
+  try {
+    print("📨 Enviando con mailer...");
+    await sendMail(
+      emailTo,
+      'Albarán y Pedido detectados',
+      body,
+      _imageFile!.path,
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Correo enviado ✅')),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al enviar: $e')),
+    );
+  }
+}
 
   // -------------------------
   // Construcción UI
