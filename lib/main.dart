@@ -148,7 +148,7 @@ class _OCRHomePageState extends State<OCRHomePage> {
     String foundPedido = '';
     String foundAlbaran = '';
 
-    final keysPedido = ['pedido', 'pedido:'];
+    final keysPedido = ['pedido', 'pedido:','pedido:  ','pedido:   ','Nº pedido:];
     final keysAlbaran = ['albaran', 'albarán', 'albaran:', 'albarán:'];
 
     for (final block in result.blocks) {
