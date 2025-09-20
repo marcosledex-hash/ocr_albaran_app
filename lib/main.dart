@@ -139,28 +139,39 @@ class _OCRHomePageState extends State<OCRHomePage> {
     return t;
   }
 
-  Future<void> _detectAll() async {
-    if (_imageFile == null) return;
-    final input = InputImage.fromFilePath(_imageFile!.path);
-    final result = await textRecognizer.processImage(input);
-    recognizedFullText = result.text;
+ Future<void> _detectAll() async {
+  if (_imageFile == null) return;
 
-    String foundPedido = '';
-    String foundAlbaran = '';
+  final input = InputImage.fromFile(_imageFile!);
+  final result = await textRecognizer.processImage(input);
+  final blocks = result.blocks;
+  recognizedFullText = result.text;
 
-    final keysPedido = ['pedido', 'pedido:','pedido:  ','pedido:   ','Nº pedido:'];
-    final keysAlbaran = ['albaran', 'albarán', 'albaran:', 'albarán:'];
+  // Reiniciar resultados
+  String foundPedido = '';
+  String foundAlbaran = '';
 
-    for (final block in result.blocks) {
-      for (final line in block.lines) {
-        final lineText = line.text;
-        final lower = _normalize(lineText);
+  final keysPedido = ['pedido', 'pedido:','NO pedido','NO pedido:','Nº pedido';'Nº pedido:'];
+  final keysAlbaran = ['albaran', 'albarán', 'albarán:', 'albaran:'];
 
-        // PEDIDO
-        for (final k in keysPedido) {
-          if (lower.contains(k)) {
-            final idx = lower.indexOf(k);
-            final after = lineText.substring(idx + k.length).trim();
+  // Escaneo línea por línea
+  for (final block in blocks) {
+    for (final line in block.lines) {
+      final lineText = line.text;
+      final lower = lineText.toLowerCase();
+
+      // === PEDIDO ===
+      for (final k in keysPedido) {
+        if (lower.contains(k)) {
+          final idx = lower.indexOf(k);
+          final after = lineText.substring(idx + k.length).trim();
+
+          // Buscar un número de 10 cifras después de la palabra "pedido"
+          final match10 = RegExp(r'\b\d{10}\b').firstMatch(after);
+          if (match10 != null) {
+            foundPedido = match10.group(0) ?? '';
+          } else {
+            // Respaldo: buscar cualquier token de al menos 3 caracteres
             final m = RegExp(r'([A-Za-z0-9\-\_/]{3,})').firstMatch(after);
             if (m != null) {
               foundPedido = m.group(0) ?? '';
@@ -170,48 +181,50 @@ class _OCRHomePageState extends State<OCRHomePage> {
             }
           }
         }
+      }
 
-        // ALBARÁN
-        for (final k in keysAlbaran) {
-          if (lower.contains(k)) {
-            final idx = lower.indexOf(k);
-            final after = lineText.substring(idx + k.length).trim();
-            final m = RegExp(r'([A-Za-z0-9\-\_/]{3,})').firstMatch(after);
-            if (m != null) {
-              foundAlbaran = m.group(0) ?? '';
-            } else {
-              final parts = after.split(RegExp(r'[\s:]+')).where((s) => s.isNotEmpty);
-              if (parts.isNotEmpty) foundAlbaran = parts.first;
-            }
+      // === ALBARÁN (igual que antes) ===
+      for (final k in keysAlbaran) {
+        if (lower.contains(k)) {
+          final idx = lower.indexOf(k);
+          final after = lineText.substring(idx + k.length).trim();
+          final m = RegExp(r'([A-Za-z0-9\-\_/]{3,})').firstMatch(after);
+          if (m != null) {
+            foundAlbaran = m.group(0) ?? '';
+          } else {
+            final parts = after.split(RegExp(r'[\s:]+')).where((s) => s.isNotEmpty);
+            if (parts.isNotEmpty) foundAlbaran = parts.first;
           }
         }
       }
     }
-
-    // Backups: si no se encuentran intentar por tokens globales
-    if (foundPedido.isEmpty) {
-      final m = RegExp(r'\b([0-9A-Za-z\-/]{4,})\b').firstMatch(result.text);
-      if (m != null) foundPedido = m.group(0) ?? '';
-    }
-    if (foundAlbaran.isEmpty) {
-      final matches = RegExp(r'\b([0-9A-Za-z\-/]{4,})\b').allMatches(result.text).toList();
-      if (matches.length >= 2) {
-        foundAlbaran = matches[1].group(0) ?? '';
-      } else if (matches.isNotEmpty) {
-        foundAlbaran = matches[0].group(0) ?? '';
-      }
-    }
-
-    setState(() {
-      pedido = foundPedido;
-      albaran = foundAlbaran;
-      pedidoController.text = pedido;
-      albaranController.text = albaran;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Detección completada')));
   }
 
+  // Respaldo si no encuentra nada
+  if (foundPedido.isEmpty) {
+    final m = RegExp(r'\b\d{10}\b').firstMatch(result.text);
+    if (m != null) foundPedido = m.group(0) ?? '';
+  }
+  if (foundAlbaran.isEmpty) {
+    final matches = RegExp(r'\b([0-9A-Za-z\-/]{4,})\b').allMatches(result.text);
+    if (matches.length >= 2) {
+      foundAlbaran = matches.elementAt(1).group(0) ?? '';
+    } else if (matches.isNotEmpty) {
+      foundAlbaran = matches.first.group(0) ?? '';
+    }
+  }
+
+  setState(() {
+    pedido = foundPedido;
+    albaran = foundAlbaran;
+  });
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Detección finalizada')),
+  );
+}
+
+       
   // -------------------------
   // Helper: retorna Rect con la selección si existe
   // -------------------------
